@@ -13,17 +13,24 @@ enum ExploitSupportPolicy {
     /// shown to users cannot drift from the boundary enforced above.
     static let ios18KernelPatchedAt = "18.7.2"
     static let verifiedIOS26BadQueryRange = "26.0–26.6.1"
-    static let verifiedIOS26WorseQueryRange = "26.7–26.7.2"
+    static let verifiedIOS26WorseQueryRange = "26.7–26.7.3"
 
     /// Every 27.0–27.2 build is accepted unconditionally, so the range must
     /// stop at the minor version — writing "27.2.1" here would claim a patch
     /// boundary that `supportsWorseQuery` does not enforce.
-    static let verifiedIOS27Range = "27.0–27.2"
+    static let verifiedIOS27Range = "27.0–27.2.x"
 
     /// 27.3 is the only 27.x line that is build-gated, so it gets its own
     /// label. Rendering it inside `verifiedIOS27Range` would hide the fact
     /// that the boundary is a build number, not a version number.
     static let verifiedIOS27BuildGatedRange = "27.3 beta 1"
+
+    /// Builds where `worse_query` was verified working on 27.3.
+    /// 24C5049d (beta 2) and 24C5049f (reissue) are deliberately absent:
+    /// Apple closed the technique there and no public replacement exists.
+    static let verifiedIOS27Builds: [String] = [
+        "24C5037i"   // iOS 27.3 beta 1 — operator-verified on hardware
+    ]
 
     static func supportsKernelExploit(
         major: Int,
@@ -56,30 +63,28 @@ enum ExploitSupportPolicy {
         return minor < 6 || (minor == 6 && patch <= 1)
     }
 
-    /// Builds where worse_query was verified working on 27.3.
+    /// worse_query targets iOS 26.0–26.7.3 and 27.0–27.2.x.
     ///
-    /// The upstream 3105 line gated every 27.x build through a table like this.
-    /// 3106 replaced it with a bare `minor <= 3`, which let 27.3 beta 2 and
-    /// later through even though Apple patched worse_query there — WQ Files
-    /// reports the patch landing in 27.3 beta 2 (24C5049d) and recommends
-    /// staying on beta 1 (24C5037i). A version range alone cannot express
-    /// "this specific build was verified"; an unlisted build must be refused,
-    /// otherwise the UI shows "activated" while every grant fails.
-    static let verifiedIOS27Builds: [String] = [
-        "24C5037i"   // iOS 27.3 beta 1 — operator-verified on hardware
-    ]
-
-    /// worse_query targets iOS 26.0–26.7.2 and 27.0–27.2 unconditionally.
+    /// 26.7.3 shipped alongside 27.2.1 on 2026-11-09. No public source lists
+    /// it, but none lists it as patched either, and the technique was still
+    /// working on 26.7.2 — so it is allowed as unverified rather than
+    /// refused. If it turns out to be patched on a given device the probe
+    /// fails and the app reports it; nothing is lost by trying.
+    ///
     /// 27.3 is gated by `verifiedIOS27Builds` because the technique was
-    /// patched mid-cycle.
-    ///
-    /// `build` defaults to an empty string on purpose: an empty build is not
-    /// in the whitelist, so any call site that forgets to pass one fails
-    /// closed on 27.3 instead of silently approving an unverified build.
-    static func supportsWorseQuery(major: Int, minor: Int, patch: Int, build: String = "") -> Bool {
+    /// patched mid-cycle. `build` defaults to an empty string on purpose: an
+    /// empty build is not in the whitelist, so any call site that forgets to
+    /// pass one fails closed on 27.3 instead of silently approving an
+    /// unverified build.
+    static func supportsWorseQuery(
+        major: Int,
+        minor: Int,
+        patch: Int,
+        build: String = ""
+    ) -> Bool {
         guard minor >= 0, patch >= 0 else { return false }
         if major == 26 {
-            return minor == 7 && patch <= 2
+            return minor == 7 && patch <= 3
         }
         if major == 27 {
             if minor <= 2 {
@@ -105,10 +110,6 @@ enum ExploitSupportPolicy {
         return minor == 7 && patch >= 2
     }
 
-    /// Every supported combination is enumerated explicitly by the three
-    /// probes above. A fourth "experimental tier" used to short-circuit here
-    /// but always returned false, which made it read as a live escape hatch
-    /// while being dead code. Anything not listed is unsupported, full stop.
     /// Whether this launch needs the user to press Unlock before container
     /// access exists.
     ///
@@ -131,13 +132,14 @@ enum ExploitSupportPolicy {
             return true
         }
         if supportsBadQuery(major: major, minor: minor, patch: patch) { return true }
-        if supportsWorseQuery(major: major, minor: minor, patch: patch, build: build) { return true }
+        if supportsWorseQuery(major: major, minor: minor, patch: patch, build: build) {
+            return true
+        }
         return false
     }
 }
 
 /// Why a device is unsupported, as a localization key plus its arguments.
-///
 /// Pure on purpose: onboarding and `AppState.detectSupport()` both need this
 /// explanation, and two hand-written copies would drift the moment one of the
 /// version boundaries changes. Returns `nil` when the device *is* supported.
